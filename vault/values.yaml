@@ -1,0 +1,11 @@
+injector:
+  enabled: false
+
+server:
+  ingress:
+    enabled: true
+    hosts:
+    - host: vault.k8s.example.com
+      path: /
+    #annotations:
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS
