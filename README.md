@@ -115,7 +115,7 @@ spec:
     spec:
       containers:
       - name: service1
-        image: dsbrng25b/k8s-s2s-auth
+        image: dvob/k8s-s2s-auth
         args:
         - client
         - http://service2.mytest.svc
@@ -217,7 +217,7 @@ spec:
     spec:
       containers:
       - name: service2
-        image: dsbrng25b/k8s-s2s-auth
+        image: dvob/k8s-s2s-auth
         args:
         - server
         - --mode
@@ -278,7 +278,7 @@ The decoding of the signature shows an error `base64: invalid input` because in 
 
 We can start the server with the `--mode` option set to `jwt-pubkey` to see the authentication with the public key in action. We do this just locally that we don't have to create a configmap for `sa.pub`.
 ```
-docker run -it -p 8080:8080 --rm -v $(pwd)/sa.pub:/sa.pub dsbrng25b/k8s-s2s-auth server --mode jwt-pubkey --pub-key /sa.pub
+docker run -it -p 8080:8080 --rm -v $(pwd)/sa.pub:/sa.pub dvob/k8s-s2s-auth server --mode jwt-pubkey --pub-key /sa.pub
 ```
 
 Test it with curl:
@@ -358,7 +358,7 @@ spec:
     spec:
       containers:
       - name: service2
-        image: dsbrng25b/k8s-s2s-auth
+        image: dvob/k8s-s2s-auth
         args:
         - server
         - --mode
@@ -390,7 +390,7 @@ spec:
     spec:
       containers:
       - name: service1
-        image: dsbrng25b/k8s-s2s-auth
+        image: dvob/k8s-s2s-auth
         args:
         - client
         - http://service2.mytest.svc
@@ -493,7 +493,7 @@ spec:
     spec:
       containers:
       - name: service2
-        image: dsbrng25b/k8s-s2s-auth
+        image: dvob/k8s-s2s-auth
         args:
         - server
         - --mode

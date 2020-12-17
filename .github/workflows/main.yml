@@ -38,9 +38,9 @@ jobs:
 
       - name: Docker Hub Release
         env:
-          KO_DOCKER_REPO: dsbrng25b
+          KO_DOCKER_REPO: dvob
         run: |
-            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u dsbrng25b --password-stdin
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u dvob --password-stdin
             ko publish -t "${GITHUB_REF##*/}" -t latest -B .
 
       - name: Github Release

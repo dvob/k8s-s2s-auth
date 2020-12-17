@@ -1,4 +1,4 @@
-module github.com/dsbrng25b/k8s-s2s-auth
+module github.com/dvob/k8s-s2s-auth
 
 go 1.15
 
