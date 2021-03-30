@@ -4,6 +4,22 @@ Service accounts are well known in Kubernetes to access the Kubernets API from w
 This README tries to give an overview on how service accounts work and and shows a couple of variants how you can use them for authentication. Further this repository contains an example Go service which shows how to implement the authentication in an application.
 
 If you have questions, feedback or if you want to share your expirience using these features feel free to start a [discussion](https://github.com/dvob/k8s-s2s-auth/discussions).
+
+* [Tutorial](#tutorial)
+  * [Scenario](#scenario)
+  * [Setup Cluster](#setup-cluster)
+    * [minikube](#minikube)
+  * [Service 1 (Client)](#service-1-client)
+  * [Service 2 (Server)](#service-2-server)
+    * [TokenReview](#tokenreview)
+    * [JWT](#jwt)
+    * [Disadvantages](#disadvantages)
+    * [TokenRequestProjection](#tokenrequestprojection)
+    * [ServiceAccountIssuerDiscovery](#serviceaccountissuerdiscovery)
+* [Appendix](#appendix)
+  * [Links](#links)
+  * [Mentioned Kubernetes Features](#mentioned-kubernetes-features)
+
 # Tutorial
 ## Scenario
 In our tutorial we look at a simple scenario with to services:
