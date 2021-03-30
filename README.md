@@ -1,31 +1,32 @@
 # Kubernetes Service Accounts
 Service accounts are well known in Kubernetes to access the Kubernets API from within the cluster. This is often used for infrastructure components like operators and controllers. But we can also use service accounts to implement authentication in our own applications.
 
-The following expermiments show how service accounts work and how we can use them to implement authentication.
+This README tries to give an overview on how service accounts work and and shows a couple of variants how you can use them for authentication. Further this repository contains an example Go service which shows how to implement the authentication in an application.
 
+# Tutorial
 ## Scenario
-We have two services:
+In our tutorial we look at a simple scenario with to services:
 * Service 1 (Client)
 * Service 2 (Server)
 
-Service1 wants to call Service2. Service2 only responds to authenticated requests.
+Service1 wants to call Service2. Service2 shall only respond to authenticated requests.
 
 ## Setup Cluster
-Setup a test cluster with minikube or another tool of your choice.
+Setup a test cluster with kind, minikube or another tool of your choice. At a later point we want to explore the TokenRequestProjection feature, thats why we have set the following options on the API server:
+* `--service-account-issuer=yourIssuer`
+* `--service-account-signing-key-file=pathToServiceAccountKey`
+
+For this tutorial I used Kubernetes 1.20.2 and an earlier version also ran on 1.19.4 but for this you have to set additional options (see in Git history).
+
+### minikube
 ```
-minikube start --kubernetes-version v1.19.2 \
-	--feature-gates=ServiceAccountIssuerDiscovery=true  \
+minikube start --kubernetes-version v1.20.2 \
 	--extra-config=apiserver.service-account-issuer=https://kubernetes.default.svc \
 	--extra-config apiserver.service-account-signing-key-file=/var/lib/minikube/certs/sa.key
 ```
 
-At a later point we want to explore some new features of Kubernetes, thats why we have set the following options on the API server:
-* `--feature-gates=ServiceAccountIssuerDiscovery=true`
-* `--service-account-issuer=yourIssuer`
-* `--service-account-signing-key-file=pathToServiceAccountKey`
-
 ## Service 1 (Client)
-Create a namespace for Service 1:
+First we want to deploy Service 1 and see how Service 1 can get a service account token which it later needs to authenticate itself to Service 2:
 ```
 kubectl create ns mytest
 
@@ -33,7 +34,8 @@ kubectl create ns mytest
 kubectl config set-context $( kubectl config current-context ) --namespace mytest
 ```
 
-Verify that the default service account and its token got created and extract the token from the secret:
+If we create a new namespace the service account controller creates the default service account for us. Further the token controller creates a secret which contains the service account token.
+We verify that the default service account and its token got created and extract the token from the secret:
 ```
 kubectl get serviceaccount default
 
@@ -60,7 +62,10 @@ echo $token | cut -d . -f 2 | base64 -d | jq
 }
 ```
 
-If we create a pod without specifiyng anything concering servcie accounts the service account admission controller sets certain defaults for us. It sets the service account itself, adds a volume with the token to to the pod and a volume mount for each container which makes the token available under `/var/run/secrets/kubernetes.io/serviceaccount/token`.
+If we create a pod without specifiyng anything concering servcie accounts the service account admission controller sets certain defaults for us:
+* sets the service account itself
+* adds a volume with the token to to the pod
+* add volume mount for each container which makes the token available under `/var/run/secrets/kubernetes.io/serviceaccount/token`
 
 Lets verify this by creating a pod which prints out the token:
 ```
@@ -93,7 +98,7 @@ kubectl get pod -w
 kubectl logs read-token
 ```
 
-We could see how we get the token into a pod and now we start service1 which will read the token and send it to service2.
+We could see how we get obtain a token in a pod and now we start Service 1 which will read the token and send it to Service 2.
 ```
 kubectl apply -f - <<EOF
 ---
@@ -121,18 +126,18 @@ spec:
         - http://service2.mytest.svc
 EOF
 ```
-Since we haven't started service2 yet the requests will fail, but we'll change this in a moment.
+Since we haven't started Service 2 yet the requests will fail, but we'll change this in a moment.
 
 ## Service 2 (Server)
-Service1 sends its token to service2 in the HTTP header:
+Service 1 sends its token to Service 2 in the HTTP Authorization header:
 ```
 GET / HTTP/1.1
 Host: service2.mytest.svc:8080
-Authorization: Bearer eyJhbGciOiJSUzI1....NiIsImtpZKRavXR4H3UQ
+Authorization: Bearer eyJhbGciOiJSUzI1...<shortened>...NiIsImtpZKRavXR4H3UQ
 User-Agent: Go-http-client/1.1
 ```
 
-Service2 wants to authenticate requests so it has to validate the token from the header. There are multiple ways to do this:
+Service 2 now shall authenticate the requests so it somehow has to validate the token from the HTTP header. There are multiple ways to do this:
 * Token Review API
 * Verify Signature of the token (JWT)
 
@@ -184,7 +189,10 @@ As a response we get a TokenReview again but with the result of the review in th
 ```
 
 If the `--service-account-lookup` option is enabled on the API server (which is the default), the token review API does not only verify the signature of the token but also checks if the service account still exists.
-If we remove the default service account (`kubectl delete sa default`)  and call the token review API again we get back an error in the status of the token review:
+If we remove the default service account and call the token review API again we get back an error in the status of the token review:
+```
+kubectl delete sa default
+```
 ```
   "kind": "TokenReview",
   "apiVersion": "authentication.k8s.io/v1",
@@ -253,6 +261,33 @@ subjects:
 EOF
 ```
 
+If we now take a look at the logs of Service 1 we no longer see `no such host` errors but errors that our Token has been invalidated:
+```
+kubectl logs -f -l app=service1
+```
+```
+...
+2021/03/30 08:34:49 Get "http://service2.mytest.svc": dial tcp: lookup service2.mytest.svc on 10.96.0.10:53: no such host
+2021/03/30 08:34:54 Get "http://service2.mytest.svc": dial tcp: lookup service2.mytest.svc on 10.96.0.10:53: no such host
+2021/03/30 08:34:59 target=http://service2.mytest.svc, status=401, response: 'Unauthorized: [invalid bearer token, Token has been invalidated]'
+2021/03/30 08:35:04 target=http://service2.mytest.svc, status=401, response: 'Unauthorized: [invalid bearer token, Token has been invalidated]'
+...
+```
+That is because we deleted the service account before which invalidated the token. To get rid of the error we have to restart Service 1.
+```
+kubectl delete pod -l app=service1
+```
+If we now look into the logs of Service 1 again we see that our requests get authenticated correctly and we get back a HTTP 200 from Service 2.
+```
+kubectl logs -f -l app=service1
+```
+```
+2021/03/30 08:38:39 start client: http://service2.mytest.svc
+2021/03/30 08:38:39 target=http://service2.mytest.svc, status=200, response: 'hello system:serviceaccount:mytest:default'
+2021/03/30 08:38:44 target=http://service2.mytest.svc, status=200, response: 'hello system:serviceaccount:mytest:default'
+...
+```
+
 ### JWT
 The token review API is not really a standard. However, JWTs is a standard and many frameworks and libraries support authentication using JWTs.
 To validate a token we need the public key of the private key which was used to sign the service account token.
@@ -274,9 +309,9 @@ Verify the signature of the service account token we have extracted before:
 ```
 openssl dgst -sha256 -verify sa.pub -signature <( echo -ne $token | awk -F. '{ printf("%s", $3) }' | tr '\-_' '+/' | base64 -d ) <( echo -ne $token | awk -F. '{ printf("%s.%s", $1, $2) }' )
 ```
-The decoding of the signature shows an error `base64: invalid input` because in the JWT signature the padding (`=`) is removed and `base64` does not like that. Nevertheless the verification should still work and show `Verfied OK`.
+The decoding of the signature shows an error `base64: invalid input` because in the JWT signature the padding (`=`) is removed and `base64` does not like that. Nevertheless the verification should still work and show `Verfied OK`. We also have to convert the signature which is base64url encoded signature to a base64 so that base64 can decode it.
 
-We can start the server with the `--mode` option set to `jwt-pubkey` to see the authentication with the public key in action. We do this just locally that we don't have to create a configmap for `sa.pub`.
+Now we can start Service 2 with the `--mode` option set to `jwt-pubkey` to see the authentication with the public key in action. We do this just locally that we don't have to create a configmap for `sa.pub`.
 ```
 docker run -it -p 8080:8080 --rm -v $(pwd)/sa.pub:/sa.pub dvob/k8s-s2s-auth server --mode jwt-pubkey --pub-key /sa.pub
 ```
@@ -286,16 +321,21 @@ Test it with curl:
 curl -H "Authorization: Bearer $token" http://localhost:8080
 ```
 
-## Disadvantages
+### Disadvantages
 We have now seen how we can use service accounts to implement authentication. But the shown methods have some drawbacks:
 
+TokenReview:
+* Needs additional request to the API server
+* The application has to talk to the Kubernetes API
+* Token never expires unless you delete/recreate the service account
+
+JWT:
 * Tokens never expire (no `exp` field in JWT)
 * Tokens have no audience (no `aud` field in JWT)
 * Copying the service account public key (`sa.pub`) from the API server to all services which have to do authentication is not optimal
 
-## New Features
 ### TokenRequestProjection
-The TokenRequestProjection feature enables the injection of service account tokens into a Pod through a projected volume. This is a beta feature since Kubernetes 1.12. It gets enabled by passing the options `--service-account-issuer` and `--service-account-signing-key-file` to the API server.
+The TokenRequestProjection feature enables the injection of service account tokens into a Pod through a projected volume.
 
 In contrast to the service account tokens we've used before, these tokens have the following benefits:
 * Tokens expire (`exp` claim in JWT is set)
@@ -368,7 +408,8 @@ spec:
 EOF
 ```
 
-Patch service1 to use a projected service account volume:
+Now Service 1 is no longer able to send requests to Service 2 because Service 2 requires that the audience is `service2`. You can verify this in the logs of Service 1.
+We now update Service 1 so that it uses a projected service account volume with the appropriate audience:
 ```
 kubectl apply -f - <<EOF
 ---
@@ -409,9 +450,10 @@ spec:
               audience: service2
 EOF
 ```
+Now you can verify in the logs of Service 1 that it again is able to authenticate itself to Servcice 2.
 
 ### ServiceAccountIssuerDiscovery
-The ServiceAccountIssuerDiscovery is available as an alpha feature since Kubernetes 1.18. It allows to fetch the public key from the API server to verfiy the JWT signatures. For this it uses the OpenID Connect Discovery mechanism. Since this is a standard it is supported by many libraries and frameworks.
+The ServiceAccountIssuerDiscovery is available as a beta feature since Kubernetes 1.20. It allows to fetch the public key from the API server to verfiy the JWT signatures. For this it uses the OpenID Connect Discovery mechanism. Since this is a standard it is supported by many libraries and frameworks.
 
 Allow access to the discovery endpoint:
 ```
@@ -451,10 +493,13 @@ curl --cacert "$CA" --cert "$CERT" --key "$KEY" "$URL/.well-known/openid-configu
   ]
 }
 ```
+```
+jwks_uri=$(curl --cacert "$CA" --cert "$CERT" --key "$KEY" "$URL/.well-known/openid-configuration" | jq -r .jwks_uri )
+```
 
 From here we fetch the JWKS (JSON Web Key Set) URL `jwks_uri` from which we can download the actual public key:
 ```
-curl --cacert "$CA" https://192.168.49.2:8443/openid/v1/jwks
+curl --cacert "$CA" $jwks_uri
 ```
 ```
 {
@@ -471,7 +516,7 @@ curl --cacert "$CA" https://192.168.49.2:8443/openid/v1/jwks
 }
 ```
 
-To see this in action we update the service2 deployment and change the `--mode` option to `oidc-discovery`.
+To see this in action we update the Service 2 deployment and change the `--mode` option to `oidc-discovery`.
 ```
 kubectl apply -f - <<EOF
 ---
@@ -506,6 +551,9 @@ spec:
         - service2
 EOF
 ```
+We also have to set the `--ca` variable so that Service 2 trusts the certificate under https://kubernetes.default.svc. Service 2 now during the startup connects to the OIDC disovery endpoints and gets the jwks_uri. Then it downloads the public key from the JWKS URI endpoint which it then uses to validate the tokens.
+
+This way your application can rely entirely on OIDC standards and no longer has to talk to Kubernetes APIs.
 
 # Appendix
 ## Links
@@ -518,11 +566,10 @@ EOF
 * ServiceAccountIssuerDiscovery
   * https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/20190730-oidc-discovery.md
 
-
 ## Mentioned Kubernetes Features
 
 Feature | Stage | Version | Description
 --- | --- | --- | ---
-TokenRequest | beta | 1.12 | Enable the TokenRequest endpoint on service account resources.
-TokenRequestProjection | beta | 1.12 | Enable the injection of service account tokens into a Pod through the projected volume.
-ServiceAccountIssuerDiscovery | alpha | 1.18 | Enable OIDC discovery endpoints (issuer and JWKS URLs) for the service account issuer in the API server.
+TokenRequest | GA | 1.20 | Enable the TokenRequest endpoint on service account resources.
+TokenRequestProjection | GA | 1.20 | Enable the injection of service account tokens into a Pod through the projected volume.
+ServiceAccountIssuerDiscovery | beta | 1.20 | Enable OIDC discovery endpoints (issuer and JWKS URLs) for the service account issuer in the API server.
