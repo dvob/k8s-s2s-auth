@@ -1,4 +1,6 @@
 # Keycloak
+With the following setup I tried to obtain a access_token from Keycloak with the client credentials flow using a service account token instead of a client secret.
+Unfortunately this did not work becuase Keycloak requires the `jti` claim in the tokens (see details below).
 
 Setup Kubernetes:
 ```
