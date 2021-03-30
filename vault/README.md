@@ -1,7 +1,7 @@
 # Vault
+The following tutorial describes how to use a service account to access a secret from a Hashicorp Vault.
 
 # Setup
-
 ## Prepare Certificate
 * Create CA
 ```
